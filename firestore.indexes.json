@@ -1,0 +1,20 @@
+{
+  "indexes": [],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "events",
+      "fieldPath": "signature",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "cash",
+      "fieldPath": "signature",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "meals",
+      "fieldPath": "signature",
+      "indexes": []
+    }
+  ]
+}

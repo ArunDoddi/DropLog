@@ -1,0 +1,7 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Cloud Functions use the Admin SDK; app clients cannot read PINs or alter roles/logs.
+    match /{document=**} { allow read, write: if false; }
+  }
+}

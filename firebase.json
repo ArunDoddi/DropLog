@@ -1,0 +1,5 @@
+{
+  "functions": [{"source": "functions", "codebase": "droplog", "ignore": ["node_modules", ".git", "*.log", "test"]}],
+  "firestore": {"rules": "firestore.rules", "indexes": "firestore.indexes.json"},
+  "emulators": {"auth": {"port": 9099}, "functions": {"port": 5001}, "firestore": {"port": 8080}, "ui": {"enabled": true}}
+}
