@@ -138,7 +138,7 @@ fun CreateUserScreen(busy: Boolean,initial: JSONObject?=null,canDemote: Boolean=
     val eligible=assignedDuties(locations,duties)
     val pinValid=(initial!=null&&pin.isEmpty()&&confirm.isEmpty()) || (pin.length in 3..8&&pin==confirm)
     val valid=first.isNotBlank()&&last.isNotBlank()&&title.isNotBlank()&&pinValid&&(manager||eligible.isNotEmpty())
-    Panel(if(initial==null) "Add employee" else "Edit ${initial.optString("name")}", "Assign access and a unique PIN") {
+    TabletForm(if(initial==null) "Create an employee" else "Edit ${initial.optString("name")}", "Admin · Users and access", "One PIN.\nOne employee.",listOf("Use 3–8 digits.","Both PINs must match.","Every PIN must be unique.")) {
         AdaptiveFormRow {
             OutlinedTextField(first,{first=it.take(50)},label={Text("First name")},singleLine=true,enabled=!busy,modifier=Modifier.weight(1f))
             OutlinedTextField(last,{last=it.take(50)},label={Text("Last name")},singleLine=true,enabled=!busy,modifier=Modifier.weight(1f))

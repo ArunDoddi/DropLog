@@ -13,8 +13,8 @@ android {
         applicationId = "com.droplog.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "0.6.3"
+        versionCode = 11
+        versionName = "0.6.5"
     }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }

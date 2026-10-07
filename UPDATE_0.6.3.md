@@ -22,7 +22,7 @@ Deploy the updated backend before using the new account actions:
 firebase deploy --only functions:droplog --project droplog-27857
 ```
 
-This includes the new `setAdminPin` callable and updated account/profile, cash and offline handlers. It also deploys the earlier meal-server and dated-activity features included in this source tree. The daily cash schedule remains 4:00 AM America/Chicago. No live accounts were deleted and no deployment was performed as part of preparing this release.
+This includes the new `setAdminPin` callable and updated account/profile, cash and offline handlers. It also deploys the earlier meal-server and dated-activity features included in this source tree. The daily cash schedule remains 4:00 AM America/Chicago. No live accounts were deleted. The matching backend was successfully deployed to droplog-27857 on October 6, 2026, after the tablet reported the older handler’s name/job-title validation during deletion.
 
 ## Design and verification
 

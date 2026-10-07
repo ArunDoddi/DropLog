@@ -50,7 +50,7 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         LocalDatabase.initialize(this)
         setContent {
-            MaterialTheme(colorScheme = lightColorScheme(primary=Color(0xFF174CDB), secondary=Color(0xFF008878), background=Color(0xFFF5F7FB), surface=Color.White)) {
+            DropLogTheme {
                 DropLog("Firebase") { }
             }
         }
@@ -66,14 +66,14 @@ fun DropLog(initialServer: String, saveServer: (String)->Unit) {
     var server by remember { mutableStateOf(initialServer) }
     var username by remember { mutableStateOf("") }; var password by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }; var user by remember { mutableStateOf(JSONObject()) }
-    var dashboard by remember { mutableStateOf(JSONObject()) }; var page by remember { mutableStateOf("Welcome") }
+    var dashboard by remember { mutableStateOf(JSONObject()) }; var page by remember { mutableStateOf("PIN") }
     val syncStatus by OfflineStore.status.collectAsState()
     var queueReview by remember {mutableStateOf(JSONArray())}
     var selectedLocation by remember { mutableStateOf("Hotel") }
     var reportType by remember { mutableStateOf("cash") }
     var reportStart by remember { mutableStateOf(LocalDate.now(ZoneId.of("America/Chicago")).minusDays(1)) }
     var reportEnd by remember { mutableStateOf(LocalDate.now(ZoneId.of("America/Chicago")).minusDays(1)) }
-    var destination by remember { mutableStateOf("Cash") }; var pin by remember { mutableStateOf("") }
+    var destination by remember { mutableStateOf("Employee") }; var pin by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }; var message by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }; var enabled by remember { mutableStateOf(false) }
     var employeeList by remember { mutableStateOf(JSONArray()) }
@@ -87,7 +87,7 @@ fun DropLog(initialServer: String, saveServer: (String)->Unit) {
     val compact=LocalConfiguration.current.screenWidthDp < 600
     val scope=rememberCoroutineScope()
     val context=LocalContext.current
-    fun reset() { token="";user=JSONObject();dashboard=JSONObject();password="";pin="";page="Welcome" }
+    fun reset() { token="";user=JSONObject();dashboard=JSONObject();password="";pin="";destination="Employee";pendingUserAction=null;confirmingAdminPin="";page="PIN" }
     fun runTask(block: suspend () -> Unit) {
         if(busy) return
         busy=true; message=""
@@ -109,11 +109,18 @@ fun DropLog(initialServer: String, saveServer: (String)->Unit) {
         try { Api(server,token).call("/logout",JSONObject()) } catch(_: Exception) { }
         reset(); message=if(queued) "Your signed log is saved on this tablet and will sync automatically. Thank you!" else "Your log is saved in the cloud. Thank you!"
     }
-    BackHandler(enabled=page!="Welcome" && !busy) {
+    BackHandler(enabled=!busy) {
         if(token.isNotEmpty()) { runTask { finishEntry(); message="Ready for the next employee." } }
-        else { page=if(page=="PIN") "Welcome" else "Welcome"; pin="";password="";message="" }
+        else {reset();message=""}
     }
     val activity=context as? MainActivity
+    SideEffect {
+        activity?.window?.let {window->
+            val controller=androidx.core.view.WindowCompat.getInsetsController(window,window.decorView)
+            controller.isAppearanceLightStatusBars=true
+            controller.isAppearanceLightNavigationBars=true
+        }
+    }
     LaunchedEffect(token) {
         activity?.lastInteraction=SystemClock.elapsedRealtime()
         while(token.isNotEmpty() && user.optString("role")!="manager") {
@@ -139,15 +146,20 @@ fun DropLog(initialServer: String, saveServer: (String)->Unit) {
     Surface(modifier=Modifier.fillMaxSize().pointerInput(Unit) {
         awaitPointerEventScope {while(true){awaitPointerEvent(PointerEventPass.Initial);activity?.lastInteraction=SystemClock.elapsedRealtime()}}
     },color=MaterialTheme.colorScheme.background) {
-        if(page=="Welcome") {
-            TabletHome(true,listOf(message,syncStatus).filter {it.isNotBlank()}.joinToString("\n"),onStart={destination="Employee";page="PIN";message=""},onChoose={destination=it;pin="";page="PIN";message=""},onAdmin={page="Admin";message=""})
+        if(page=="PIN") {
+            Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                PinScreen(destination,pin,busy,onChange={pin=it},onContinue={runTask {
+                    val result=Api(server).call("/pin-login",JSONObject().put("pin",pin));user=result.getJSONObject("user");token=result.getString("token");pin="";refresh();page=if(user.optString("role")=="manager") "AdminHome" else "Menu"
+                }},onAdmin={page="Admin";pin="";password="";message=""},message=listOf(message,syncStatus).filter {it.isNotBlank() && it!="All logs synced"}.joinToString("\n"))
+            }
         } else {
             Box(Modifier.fillMaxSize().safeDrawingPadding(),contentAlignment=Alignment.TopCenter) {
-                Column(Modifier.widthIn(max=1000.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal=if(compact) 12.dp else 32.dp,vertical=20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.widthIn(max=1440.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal=if(compact) 20.dp else 48.dp,vertical=32.dp),verticalArrangement=Arrangement.spacedBy(24.dp)) {
                     FlowRow(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalArrangement=Arrangement.spacedBy(8.dp)) {
                         Column {
                             Text("DropLog",style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Bold)
-                            Text("Version ${BuildConfig.VERSION_NAME}",style=MaterialTheme.typography.bodySmall)
+                            Text("BEST WESTERN SWISS CLOCK INN",style=MaterialTheme.typography.bodySmall,color=TabletPalette.Muted)
+                            Text("Version ${BuildConfig.VERSION_NAME}",style=MaterialTheme.typography.bodySmall,color=TabletPalette.Muted)
                         }
                         Row(verticalAlignment=Alignment.CenterVertically) {
                             if(token.isNotEmpty() && user.optString("role")=="manager") {
@@ -155,20 +167,14 @@ fun DropLog(initialServer: String, saveServer: (String)->Unit) {
                                     Icon(painterResource(R.drawable.ic_settings),contentDescription="Admin options",tint=MaterialTheme.colorScheme.primary)
                                 }
                             }
-                            TextButton(enabled=!busy,onClick={if(token.isEmpty()) {page="Welcome";pin="";password=""} else runTask {finishEntry();message="Ready for the next employee."}}) { Text("Home / Sign out") }
+                            TextButton(enabled=!busy,onClick={if(token.isEmpty()) {reset();message=""} else runTask {finishEntry();message="Ready for the next employee."}}) { Text("Home / Sign out") }
                         }
                     }
-                    if(token.isNotEmpty()) Text("${user.optString("name")} • ${user.optString("job_title")} • ${user.optString("location")}",color=Color(0xFF64748B))
+                    if(token.isNotEmpty() && page !in listOf("Cash","Equipment","Meal","Menu")) Text("${user.optString("name")} • ${user.optString("job_title")} • ${user.optString("location")}",color=TabletPalette.Muted)
                     if(page in listOf("Cash","Equipment") && workingShifts(user,dashboard.optJSONObject("shift"),destination).size>1) TextButton(onClick={routeToShift()},enabled=!busy) {Text("Change working shift")}
                     if(syncStatus.isNotBlank())Text(syncStatus,color=MaterialTheme.colorScheme.secondary)
                     if(page in listOf("Cash","Equipment","Shift","Meal","Housekeeping"))TextButton(onClick={runTask {refresh();page="Menu"}},enabled=!busy){Text("Back to my actions")}
                     when(page) {
-                        "PIN" -> {
-                            PinScreen(destination,pin,busy,onChange={pin=it},onContinue={ runTask {
-                                val result=Api(server).call("/pin-login",JSONObject().put("pin",pin))
-                                user=result.getJSONObject("user");token=result.getString("token");pin="";refresh();page=if(user.optString("role")=="manager") "AdminHome" else "Menu"
-                            } })
-                        }
                         "Admin" -> Panel("Admin sign-in", "Manage employees and cloud report emails") {
                             OutlinedTextField(username,{username=it},label={Text("Admin email")},singleLine=true,modifier=Modifier.fillMaxWidth())
                             OutlinedTextField(password,{password=it},label={Text("Admin password")},visualTransformation=PasswordVisualTransformation(),singleLine=true,modifier=Modifier.fillMaxWidth())
@@ -270,14 +276,9 @@ fun DropLog(initialServer: String, saveServer: (String)->Unit) {
                             Row {TextButton(onClick={runTask {refresh()}},enabled=!busy) {Text("Refresh")};TextButton(onClick={page="AdminHome"}) {Text("Back to admin")}}
                         }
                         "Settings" -> {
-                            Panel("Report email settings", "Daily cash report • 4:00 AM • America/Chicago") {
-                                OutlinedTextField(email,{email=it},label={Text("Report email address")},singleLine=true,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Email),modifier=Modifier.fillMaxWidth())
-                                Row(verticalAlignment=Alignment.CenterVertically) {Switch(enabled,{enabled=it},enabled=!busy);Text("Send daily cash report",Modifier.padding(12.dp))}
-                                Button(onClick={runTask {val recipient=email.trim();Api(server,token).call("/settings",JSONObject().put("email",recipient).put("enabled",enabled));email=recipient;message="Report settings saved."}},enabled=!busy) {Text("Save settings")}
-                                OutlinedButton(onClick={runTask {Api(server,token).call("/test-email",JSONObject());message="Test email sent to the saved address."}},enabled=!busy) {Text("Send test email")}
-                                OutlinedButton(onClick={runTask {val result=Api(server,token).call("/reports/previous",JSONObject());message="Report for ${result.getString("date")} sent to the saved address."}},enabled=!busy) {Text("Send yesterday’s cash report")}
-                                Text("Save changes before sending. Email delivery needs Firebase Cloud Functions and the email provider configured.",style=MaterialTheme.typography.bodySmall)
-                            }
+                            ReportSettingsScreen(email,enabled,busy,onEmail={email=it},onEnabled={enabled=it},onSave={runTask {
+                                val recipient=email.trim();Api(server,token).call("/settings",JSONObject().put("email",recipient).put("enabled",enabled));email=recipient;message="Report settings saved."
+                            }},onTest={runTask {Api(server,token).call("/test-email",JSONObject());message="Test email sent to the saved address."}},onPrevious={runTask {val result=Api(server,token).call("/reports/previous",JSONObject());message="Report for ${result.getString("date")} sent to the saved address."}})
                             Panel("Email a report", "Select one day or a date range. Equipment reports are sent only when requested.") {
                                 FlowRow(horizontalArrangement=Arrangement.spacedBy(12.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                                     listOf("cash","equipment").forEach {type->FilterChip(selected=reportType==type,onClick={reportType=type},enabled=!busy,label={Text(if(type=="cash") "Cash" else "Radio & keys")})}
@@ -301,25 +302,13 @@ fun DropLog(initialServer: String, saveServer: (String)->Unit) {
 }
 
 @Composable
-fun TabletHome(welcome: Boolean,message: String,onStart:()->Unit,onChoose:(String)->Unit,onAdmin:()->Unit) {
-    val navy=Color(0xFF102A43)
-    BoxWithConstraints(Modifier.fillMaxSize().background(if(welcome) navy else Color(0xFFF3F6FB)).safeDrawingPadding()) {
-        val compact=this.maxWidth<600.dp || this.maxHeight<480.dp
-        val viewportHeight=this.maxHeight
-        Column(Modifier.fillMaxWidth().heightIn(min=viewportHeight).verticalScroll(rememberScrollState()).padding(if(compact) 20.dp else 32.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(24.dp,Alignment.CenterVertically)) {
-            Column(Modifier.widthIn(max=820.dp).fillMaxWidth()) {
-                Text("DropLog · ${BuildConfig.VERSION_NAME}",fontSize=if(compact) 24.sp else 28.sp,fontWeight=FontWeight.Bold,color=if(welcome) Color.White else navy)
-                Text("BEST WESTERN SWISS CLOCK INN",fontSize=12.sp,color=if(welcome) Color(0xFFB9CBDE) else Color(0xFF64748B))
-            }
-            Text(if(welcome) "A smooth shift starts here." else "What would you like to log?",fontSize=if(compact) 30.sp else 42.sp,fontWeight=FontWeight.Bold,color=if(welcome) Color.White else navy,textAlign=TextAlign.Center,modifier=Modifier.widthIn(max=820.dp))
-            Text(if(welcome) "Cash drops. Radio & keys. Housekeeping meals." else "Choose a log, then enter your employee PIN.",fontSize=if(compact) 18.sp else 20.sp,color=if(welcome) Color(0xFFB9CBDE) else Color(0xFF64748B),textAlign=TextAlign.Center)
-            if(welcome)Button(onClick=onStart,modifier=Modifier.widthIn(max=300.dp).fillMaxWidth().heightIn(min=72.dp),shape=RoundedCornerShape(20.dp)){Text("Let’s start",fontSize=24.sp)}
-            else {
-                Button(onClick={onChoose("Cash")},modifier=Modifier.widthIn(max=440.dp).fillMaxWidth().heightIn(min=72.dp)){Text("Cash",fontSize=24.sp)}
-                Button(onClick={onChoose("Equipment")},modifier=Modifier.widthIn(max=440.dp).fillMaxWidth().heightIn(min=72.dp)){Text("Equipment",fontSize=24.sp)}
-            }
-            if(message.isNotEmpty())Text(message,color=if(welcome) Color.White else navy,textAlign=TextAlign.Center)
-            TextButton(onClick=onAdmin){Text("Admin recovery · Email sign-in",color=if(welcome) Color(0xFFB9CBDE) else navy)}
+fun ActionCard(number: String,title: String,description: String,color: Color,modifier: Modifier=Modifier,enabled: Boolean=true,onClick:()->Unit) {
+    Card(modifier=modifier,shape=RoundedCornerShape(28.dp),colors=CardDefaults.cardColors(containerColor=Color.White)) {
+        Column(Modifier.padding(28.dp),verticalArrangement=Arrangement.spacedBy(24.dp)) {
+            Text(number,fontSize=16.sp,fontWeight=FontWeight.Bold,color=color)
+            Text(title,style=MaterialTheme.typography.headlineLarge)
+            Text(description,style=MaterialTheme.typography.bodyLarge,color=TabletPalette.Muted)
+            Button(onClick=onClick,enabled=enabled,colors=ButtonDefaults.buttonColors(containerColor=color),modifier=Modifier.fillMaxWidth().heightIn(min=64.dp),shape=RoundedCornerShape(20.dp)){Text(title,fontSize=24.sp)}
         }
     }
 }
@@ -332,17 +321,44 @@ fun AdaptiveFormRow(content: @Composable FlowRowScope.()->Unit) {
 }
 
 @Composable
-fun PinScreen(destination: String,pin: String,busy: Boolean,onChange:(String)->Unit,onContinue:()->Unit) {
-    Column(Modifier.fillMaxWidth(),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(10.dp)) {
-        Text("$destination • Enter your PIN",fontSize=28.sp,fontWeight=FontWeight.Bold)
-        Text("Your 3–8 digit PIN identifies your employee account.")
-        Text(if(pin.isEmpty()) "— — —" else "● ".repeat(pin.length),fontSize=30.sp,modifier=Modifier.padding(8.dp))
-        listOf(listOf("1","2","3"),listOf("4","5","6"),listOf("7","8","9"),listOf("Clear","0","⌫")).forEach { row ->
-            Row(Modifier.widthIn(max=440.dp).fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-                row.forEach { digit -> OutlinedButton(onClick={onChange(when(digit) {"Clear"->"";"⌫"->pin.dropLast(1);else->if(pin.length<8) pin+digit else pin})},enabled=!busy,modifier=Modifier.weight(1f).heightIn(min=58.dp),shape=RoundedCornerShape(14.dp)) {Text(digit,fontSize=22.sp)} }
+fun PinScreen(destination: String,pin: String,busy: Boolean,onChange:(String)->Unit,onContinue:()->Unit,onAdmin:()->Unit={},message: String="") {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val wide=this.maxWidth>=850.dp
+        val height=this.maxHeight
+        Column(Modifier.fillMaxWidth().heightIn(min=height).verticalScroll(rememberScrollState()).padding(if(wide)48.dp else 24.dp)) {
+            val keypad:@Composable ()->Unit={
+                Column(verticalArrangement=Arrangement.spacedBy(20.dp)) {
+                    Text("Enter your PIN",style=MaterialTheme.typography.headlineLarge)
+                    Card(colors=CardDefaults.cardColors(containerColor=Color.White),shape=RoundedCornerShape(16.dp),modifier=Modifier.fillMaxWidth()) {
+                        Text(if(pin.isEmpty()) "— — —" else "●  ".repeat(pin.length),fontSize=28.sp,textAlign=TextAlign.Center,modifier=Modifier.fillMaxWidth().padding(16.dp))
+                    }
+                    Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                        listOf(listOf("1","2","3"),listOf("4","5","6"),listOf("7","8","9"),listOf("Clear","0","⌫")).forEach {row->
+                            Row(horizontalArrangement=Arrangement.spacedBy(12.dp)) {row.forEach {digit->
+                                Button(onClick={onChange(when(digit){"Clear"->"";"⌫"->pin.dropLast(1);else->if(pin.length<8)pin+digit else pin})},enabled=!busy,colors=ButtonDefaults.buttonColors(containerColor=TabletPalette.Navy),shape=RoundedCornerShape(20.dp),modifier=Modifier.weight(1f).height(64.dp)){Text(digit,fontSize=24.sp)}
+                            }}
+                        }
+                    }
+                    Button(onClick=onContinue,enabled=!busy&&pin.length in 3..8,modifier=Modifier.fillMaxWidth().height(68.dp),shape=RoundedCornerShape(20.dp)){Text("Continue",fontSize=24.sp)}
+                    if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
+                    if(message.isNotBlank())Text(message,color=MaterialTheme.colorScheme.primary)
+                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
+                        Text("DropLog · ${BuildConfig.VERSION_NAME}",style=MaterialTheme.typography.bodySmall,color=TabletPalette.Muted)
+                        TextButton(onClick=onAdmin,enabled=!busy){Text("Admin email sign-in")}
+                    }
+                }
             }
+            if(wide)Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(72.dp)) {
+                Card(Modifier.weight(1f).heightIn(min=620.dp),shape=RoundedCornerShape(28.dp),colors=CardDefaults.cardColors(containerColor=TabletPalette.Navy)) {
+                    Column(Modifier.padding(36.dp),verticalArrangement=Arrangement.spacedBy(48.dp)) {
+                        Text(if(destination=="Employee") "EMPLOYEE ACCESS" else destination.uppercase(),color=Color.White,fontSize=16.sp)
+                        Text("Your log.\nYour signature.",fontSize=44.sp,lineHeight=56.sp,fontWeight=FontWeight.Bold,color=Color.White)
+                        Text("Enter your 3–8 digit PIN to open your employee account.",fontSize=22.sp,lineHeight=30.sp,color=Color.White)
+                    }
+                }
+                Box(Modifier.weight(1f)){keypad()}
+            } else keypad()
         }
-        Button(onClick=onContinue,enabled=!busy && pin.length in 3..8,modifier=Modifier.widthIn(max=440.dp).fillMaxWidth().heightIn(min=58.dp)) {Text("Continue",fontSize=20.sp)}
     }
 }
 
@@ -392,12 +408,9 @@ fun DateField(label: String,value: LocalDate,enabled: Boolean,onChange:(LocalDat
 
 @Composable
 fun Panel(title: String, subtitle: String, content: @Composable ColumnScope.()->Unit) {
-    Card(shape=RoundedCornerShape(24.dp),colors=CardDefaults.cardColors(containerColor=Color.White),modifier=Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            Text(title,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold)
-            Text(subtitle,style=MaterialTheme.typography.bodySmall,color=Color(0xFF657086))
-            content()
-        }
+    Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(28.dp)) {
+        ScreenHeading(title,subtitle)
+        FormCard(Modifier.fillMaxWidth(),content)
     }
 }
 
@@ -407,7 +420,9 @@ fun CashScreen(user: JSONObject,department: String,busy: Boolean,submit:(String,
     var amount by remember {mutableStateOf("")};var venue by remember {mutableStateOf(outlets.firstOrNull() ?: "Restaurant")};var meal by remember {mutableStateOf(if(venue=="Bar") "Lunch" else "Breakfast")}
     var signature by remember {mutableStateOf(JSONArray())};var confirm by remember {mutableStateOf(false)}
     val requestId=remember(department,amount,venue,meal,signature.toString()) {UUID.randomUUID().toString()}
-    Panel("${user.optString("name")} · $department cash", "Your full name, date and time are recorded automatically") {
+    TabletForm("Record a cash drop", "${user.optString("name")} · ${user.optString("job_title")} · $department", "Quick and accurate",listOf("1. Choose your assigned location","2. Enter the cash amount","3. Sign, review and save","The tablet returns home after saving.")) {
+        Text("Job location",color=TabletPalette.Muted)
+        Button(onClick={},enabled=false,colors=ButtonDefaults.buttonColors(disabledContainerColor=TabletPalette.Blue,disabledContentColor=Color.White),modifier=Modifier.fillMaxWidth().height(64.dp),shape=RoundedCornerShape(20.dp)){Text(department,fontSize=24.sp)}
         if(workingShifts(user,null).size>1)Text("Working shift: $department cash",color=MaterialTheme.colorScheme.secondary)
         if(department=="Restaurant") {
             ChoiceDropdown("Outlet",outlets,venue,busy) {venue=it;if(venue=="Bar" && meal=="Breakfast")meal="Lunch"}
@@ -416,7 +431,7 @@ fun CashScreen(user: JSONObject,department: String,busy: Boolean,submit:(String,
         OutlinedTextField(amount,{amount=it},label={Text("Cash amount ($)")},singleLine=true,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal),enabled=!busy,modifier=Modifier.fillMaxWidth())
         Text("Employee signature",fontWeight=FontWeight.Bold)
         SignaturePad(enabled=!busy) {signature=it}
-        Button(onClick={confirm=true},enabled=!busy && signature.length()>0 && amount.toBigDecimalOrNull()?.let {it.signum()>0 && it.scale()<=2 && it<=java.math.BigDecimal("1000000")}==true,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {Text("Review & save cash")}
+        Button(onClick={confirm=true},enabled=!busy && signature.length()>0 && amount.toBigDecimalOrNull()?.let {it.signum()>0 && it.scale()<=2 && it<=java.math.BigDecimal("1000000")}==true,modifier=Modifier.fillMaxWidth().heightIn(min=64.dp),shape=RoundedCornerShape(20.dp)) {Text("Review & save cash",fontSize=22.sp)}
     }
     if(confirm)AlertDialog(onDismissRequest={confirm=false},title={Text("Confirm cash drop")},text={Text("${user.optString("name")}\n$department${if(department=="Restaurant") " · $venue · $meal" else ""}\nAmount: $$amount")},confirmButton={TextButton(onClick={confirm=false;submit(amount,venue,meal,signature,requestId)}) {Text("Save signed cash log")}},dismissButton={TextButton(onClick={confirm=false}) {Text("Cancel")}})
 }
@@ -431,7 +446,8 @@ fun EquipmentScreen(user: JSONObject,shift: JSONObject?,location: String,busy: B
     var confirmEnd by remember {mutableStateOf(false)}
     val requestId=remember(state,action,radio,keys,signature.toString()) {UUID.randomUUID().toString()}
     val checkout=action=="start" || action=="in"
-    Panel("${user.optString("name")} · Radio & keys", "${if(state=="end" && action=="undo_end") shift?.optString("location",location) else location} · ${when(state){"ready"->"Ready to start";"end"->"Shift ended";"in","start","lunch_in"->"Equipment checked out";else->"Equipment returned"}}") {
+    TabletForm("Radio & keys", "${user.optString("name")} · ${user.optString("job_title")} · $location", "Your shift",listOf("01  Start work · Collect","02  Out · Return equipment","03  In · Collect equipment","04  End work · Return","Confirm both numbers each time you collect."),softHelp=false) {
+        Text(when(action){"start"->"Start work · Collect equipment";"in"->"In · Collect equipment";"out"->"Out · Return equipment";"end"->"End work · Return equipment";else->"Reopen your shift"},style=MaterialTheme.typography.titleLarge)
         if(state=="end") {
             FlowRow(horizontalArrangement=Arrangement.spacedBy(12.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected=action=="start",onClick={action="start"},enabled=!busy,label={Text("Start new shift")})
@@ -446,8 +462,10 @@ fun EquipmentScreen(user: JSONObject,shift: JSONObject?,location: String,busy: B
             }
         }
         if(checkout) {
-            OutlinedTextField(radio,{radio=it.filter {c->c in '0'..'9'}.take(6)},label={Text("Radio number")},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number),enabled=!busy,singleLine=true,modifier=Modifier.fillMaxWidth())
-            OutlinedTextField(keys,{keys=it.filter {c->c in '0'..'9'}.take(6)},label={Text("Key set number")},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number),enabled=!busy,singleLine=true,modifier=Modifier.fillMaxWidth())
+            AdaptiveFormRow {
+                OutlinedTextField(radio,{radio=it.filter {c->c in '0'..'9'}.take(6)},label={Text("Radio number")},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number),enabled=!busy,singleLine=true,modifier=Modifier.weight(1f))
+                OutlinedTextField(keys,{keys=it.filter {c->c in '0'..'9'}.take(6)},label={Text("Key set number")},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number),enabled=!busy,singleLine=true,modifier=Modifier.weight(1f))
+            }
         } else if(action!="undo_end")Text("Radio ${shift?.optString("radio")} · Keys ${shift?.optString("keys")}${if(state in listOf("out","lunch_out")) " · already returned" else " · return before signing"}")
         if(action=="end" && activeShift) {
             Text("End shift selected. Sign below to finish, or undo to continue your shift.")
@@ -455,7 +473,7 @@ fun EquipmentScreen(user: JSONObject,shift: JSONObject?,location: String,busy: B
         }
         Text("Employee signature",fontWeight=FontWeight.Bold)
         key(state,action) {SignaturePad(enabled=!busy) {signature=it}}
-        Button(onClick={submit(action,radio,keys,signature,requestId)},enabled=!busy && signature.length()>0 && (!checkout || radio.isNotBlank() && keys.isNotBlank()),modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {Text(when(action){"end"->"Sign & end shift";"undo_end"->"Sign & reopen shift";"out"->"Sign & return equipment";else->"Sign & collect equipment"})}
+        Button(onClick={submit(action,radio,keys,signature,requestId)},enabled=!busy && signature.length()>0 && (!checkout || radio.isNotBlank() && keys.isNotBlank()),modifier=Modifier.fillMaxWidth().heightIn(min=64.dp),colors=ButtonDefaults.buttonColors(containerColor=TabletPalette.Teal),shape=RoundedCornerShape(20.dp)) {Text(when(action){"end"->"Sign & end shift";"undo_end"->"Sign & reopen shift";"out"->"Sign & return equipment";else->"Sign & collect equipment"})}
     }
     if(confirmEnd)AlertDialog(onDismissRequest={confirmEnd=false},title={Text("Are you sure to End the Shift?")},text={Text("Return your radio and keys. You will then sign to confirm ending your shift.")},confirmButton={TextButton(onClick={confirmEnd=false;action="end"}) {Text("Yes, end shift")}},dismissButton={TextButton(onClick={confirmEnd=false}) {Text("Continue shift")}})
 }
@@ -469,12 +487,15 @@ fun SignaturePad(enabled: Boolean = true,onChange:(JSONArray)->Unit) {
         strokes.forEach { stroke -> val points=JSONArray(); stroke.forEach { p-> points.put(JSONArray().put(p.x.toDouble()).put(p.y.toDouble())) }; array.put(points) }
         onChange(array)
     }
-    Canvas(Modifier.fillMaxWidth().height(150.dp).background(Color(0xFFF0F3F8),RoundedCornerShape(12.dp)).pointerInput(enabled) {
+    Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.Center) {
+    Canvas(Modifier.fillMaxWidth().height(120.dp).background(Color(0xFFF0F3F8),RoundedCornerShape(12.dp)).pointerInput(enabled) {
         if(!enabled)return@pointerInput
         fun normalized(p: Offset)=Offset((p.x/size.width).coerceIn(0f,1f),(p.y/size.height).coerceIn(0f,1f))
         detectDragGestures(onDragStart={current=listOf(normalized(it))},onDragEnd={if(current.size>=3 && strokes.size<30) { strokes.add(current); publish() };current=emptyList()},onDragCancel={current=emptyList()}) { change,_ -> change.consume(); if(current.size<2000) current=current+normalized(change.position) }
     }) {
         (strokes.toList()+listOf(current)).forEach { stroke -> stroke.zipWithNext().forEach { (a,b)-> drawLine(Color(0xFF172B4D),Offset(a.x*size.width,a.y*size.height),Offset(b.x*size.width,b.y*size.height),strokeWidth=4f) } }
+    }
+    if(strokes.isEmpty()&&current.isEmpty())Text("Draw your signature here",color=TabletPalette.Muted,style=MaterialTheme.typography.bodyLarge)
     }
     TextButton(onClick={strokes.clear();current=emptyList();publish()},enabled=enabled) { Text("Clear signature") }
 }
@@ -484,13 +505,27 @@ fun SignaturePad(enabled: Boolean = true,onChange:(JSONArray)->Unit) {
 fun EmployeeActions(user: JSONObject,busy: Boolean,onCash:()->Unit,onEquipment:()->Unit,onMeal:()->Unit,@Suppress("UNUSED_PARAMETER") onHousekeeping:()->Unit) {
     val choices=workingShifts(user,null)
     val housekeeping=choices.any {it.duty=="equipment"}
-    Panel("Hello, ${user.optString("name")}", "Choose what you would like to log for your shift") {
-        if(!housekeeping && choices.any {it.duty!="equipment"})Button(onClick=onCash,enabled=!busy,modifier=Modifier.fillMaxWidth().heightIn(min=68.dp)){Text("Drop cash",fontSize=22.sp)}
-        if(housekeeping){
-            Button(onClick=onEquipment,enabled=!busy,modifier=Modifier.fillMaxWidth().heightIn(min=68.dp)){Text("Log equipment",fontSize=22.sp)}
-            Button(onClick=onMeal,enabled=!busy,modifier=Modifier.fillMaxWidth().heightIn(min=68.dp)){Text(if(user.optString("employment_type")=="ortiz") "Log Ortiz meal" else "Log meal",fontSize=22.sp)}
+    Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(36.dp)) {
+        ScreenHeading("What would you like to log?","${user.optString("name")} · ${user.optString("job_title")}")
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val cards:@Composable RowScope.()->Unit={
+                if(!housekeeping&&choices.any {it.duty!="equipment"})ActionCard("01","Drop cash","Record a signed cash drop at your assigned location.",TabletPalette.Blue,Modifier.weight(1f),!busy,onCash)
+                if(housekeeping) {
+                    ActionCard("01","Log equipment","Collect or return your numbered radio and keys.",TabletPalette.Teal,Modifier.weight(1f),!busy,onEquipment)
+                    ActionCard("02",if(user.optString("employment_type")=="ortiz") "Log Ortiz meal" else "Log meal","Sign to confirm your employee meal.",TabletPalette.Blue,Modifier.weight(1f),!busy,onMeal)
+                }
+            }
+            if(this.maxWidth>=850.dp)Row(Modifier.fillMaxWidth().padding(horizontal=80.dp),horizontalArrangement=Arrangement.spacedBy(32.dp),content=cards)
+            else Column(verticalArrangement=Arrangement.spacedBy(24.dp)) {
+                if(!housekeeping&&choices.any {it.duty!="equipment"})ActionCard("01","Drop cash","Record a signed cash drop.",TabletPalette.Blue,Modifier.fillMaxWidth(),!busy,onCash)
+                if(housekeeping) {
+                    ActionCard("01","Log equipment","Collect or return your radio and keys.",TabletPalette.Teal,Modifier.fillMaxWidth(),!busy,onEquipment)
+                    ActionCard("02",if(user.optString("employment_type")=="ortiz") "Log Ortiz meal" else "Log meal","Sign to confirm your employee meal.",TabletPalette.Blue,Modifier.fillMaxWidth(),!busy,onMeal)
+                }
+            }
         }
         if(choices.isEmpty())Text("No log duties are assigned. Ask an admin to update your account.")
+        Text("Every log is linked to your employee account.",color=TabletPalette.Muted)
     }
 }
 
